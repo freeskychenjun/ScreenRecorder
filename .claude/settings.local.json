@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(timeout:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(pip install:*)",
+      "Bash(ping:*)",
+      "Bash(wmic:*)",
+      "Bash(dir:*)",
+      "Bash(start python:*)",
+      "Bash(pyinstaller:*)",
+      "Bash(pipwin:*)",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(choco install:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(taskkill:*)",
+      "Bash(pip show:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
