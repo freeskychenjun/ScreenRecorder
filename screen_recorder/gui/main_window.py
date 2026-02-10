@@ -14,6 +14,7 @@ import os
 
 from gui.controls import ControlPanel
 from gui.region_selector import RegionSelector
+from gui.floating_ball import FloatingControlBall
 from core.recorder import Recorder, RecorderState
 
 
@@ -52,6 +53,9 @@ class MainWindow(QMainWindow):
 
         # 初始化系统托盘
         self._init_system_tray()
+
+        # 初始化悬浮控制球
+        self._init_floating_ball()
 
         # 确保输出目录存在
         self._ensure_output_directory()
@@ -247,6 +251,11 @@ class MainWindow(QMainWindow):
         self.show_action = tray_menu.addAction("显示窗口")
         self.show_action.triggered.connect(self._show_window)
 
+        # 显示悬浮球
+        self.show_ball_action = tray_menu.addAction("显示悬浮球")
+        self.show_ball_action.triggered.connect(self._show_floating_ball)
+        self.show_ball_action.setEnabled(False)  # 初始禁用
+
         # 开始/停止录制
         self.record_action = tray_menu.addAction("开始录制")
         self.record_action.triggered.connect(self._toggle_recording)
@@ -281,6 +290,18 @@ class MainWindow(QMainWindow):
 
         # 更新托盘状态
         self._update_tray_state()
+
+    def _init_floating_ball(self):
+        """初始化悬浮控制球"""
+        self.floating_ball = FloatingControlBall()
+        self.floating_ball.pause_clicked.connect(self._pause_recording)
+        self.floating_ball.stop_clicked.connect(self._stop_recording)
+        self.floating_ball.ball_hidden.connect(self._on_floating_ball_hidden)
+
+    def _on_floating_ball_hidden(self):
+        """悬浮球被隐藏时的回调"""
+        # 可以在托盘菜单中添加"显示悬浮球"选项
+        pass
 
     def _show_window(self):
         """显示主窗口"""
@@ -356,19 +377,26 @@ class MainWindow(QMainWindow):
             self.record_action.setText("开始录制")
             self.pause_action.setEnabled(False)
             self.pause_action.setText("暂停录制")
+            self.show_ball_action.setEnabled(False)
             self.tray_icon.setToolTip("屏幕录制软件")
         elif state == RecorderState.RECORDING:
             # 录制中
             self.record_action.setText("停止录制")
             self.pause_action.setEnabled(True)
             self.pause_action.setText("暂停录制")
+            self.show_ball_action.setEnabled(True)
             self.tray_icon.setToolTip("屏幕录制软件 - 录制中")
         elif state == RecorderState.PAUSED:
             # 已暂停
             self.record_action.setText("停止录制")
             self.pause_action.setEnabled(True)
             self.pause_action.setText("恢复录制")
+            self.show_ball_action.setEnabled(True)
             self.tray_icon.setToolTip("屏幕录制软件 - 已暂停")
+
+    def _show_floating_ball(self):
+        """显示悬浮控制球"""
+        self.floating_ball.show_ball()
 
     def _really_close(self):
         """真正关闭程序"""
@@ -390,10 +418,11 @@ class MainWindow(QMainWindow):
         self.region_selector = RegionSelector(None)
         self.region_selector.region_selected.connect(self._on_region_selected)
         # 连接关闭信号以重新显示主窗口
-        self.region_selector.window_closed.connect(self.show)
-        
-        # 隐藏主窗口并显示选择器
+        self.region_selector.window_closed.connect(self._on_region_selector_closed)
+
+        # 隐藏主窗口和悬浮球
         self.hide()
+        self.floating_ball.hide_ball()
         self.region_selector.show()
 
     def _on_region_selected(self, region: Dict):
@@ -406,6 +435,14 @@ class MainWindow(QMainWindow):
         self.record_region = region
         self.control_panel.set_region(region)
         self.status_bar.showMessage(f"已选择录制区域: {region['width']}x{region['height']}")
+
+    def _on_region_selector_closed(self):
+        """区域选择器关闭时的回调"""
+        # 显示主窗口
+        self.show()
+        # 如果正在录制，恢复悬浮球显示
+        if self.recorder.is_recording():
+            self.floating_ball.show_ball()
 
     def _start_recording(self):
         """开始录制"""
@@ -442,11 +479,13 @@ class MainWindow(QMainWindow):
         if state == RecorderState.RECORDING:
             self.recorder.pause_recording()
             self.control_panel.set_recording_state('paused')
+            self.floating_ball.set_recording_state('paused')
             self.status_bar.showMessage("录制已暂停")
             self._update_tray_state()
         elif state == RecorderState.PAUSED:
             self.recorder.resume_recording()
             self.control_panel.set_recording_state('recording')
+            self.floating_ball.set_recording_state('recording')
             self.status_bar.showMessage("录制继续...")
             self._update_tray_state()
 
@@ -460,7 +499,9 @@ class MainWindow(QMainWindow):
 
     def _on_recording_started(self):
         """录制开始回调"""
-        pass
+        # 显示悬浮控制球
+        self.floating_ball.set_recording_state('recording')
+        self.floating_ball.show_ball()
 
     def _on_recording_stopped(self, output_path: str, frame_count: int, duration: float):
         """
@@ -479,6 +520,9 @@ class MainWindow(QMainWindow):
 
         # 更新托盘状态
         self._update_tray_state()
+
+        # 隐藏悬浮控制球
+        self.floating_ball.hide_ball()
 
         # 显示主窗口
         self._show_window()
@@ -725,6 +769,7 @@ class MainWindow(QMainWindow):
 
             if reply == QMessageBox.Yes:
                 self.recorder.stop_recording()
+                self.floating_ball.cleanup()
                 self.tray_icon.hide()
                 event.accept()
             else:
@@ -742,5 +787,6 @@ class MainWindow(QMainWindow):
                     2000
                 )
             else:
+                self.floating_ball.cleanup()
                 self.tray_icon.hide()
                 event.accept()

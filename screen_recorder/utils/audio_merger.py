@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 
-def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> bool:
+def merge_audio_video(video_path: str, audio_path: str, output_path: str, video_fps: float = None) -> bool:
     """
     使用FFmpeg合并音视频
 
@@ -13,6 +13,7 @@ def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> boo
         video_path: 视频文件路径
         audio_path: 音频文件路径
         output_path: 输出文件路径
+        video_fps: 视频实际帧率（可选），用于修正视频时间戳
 
     Returns:
         bool: 是否成功合并
@@ -32,12 +33,27 @@ def merge_audio_video(video_path: str, audio_path: str, output_path: str) -> boo
             'ffmpeg',
             '-i', video_path,
             '-i', audio_path,
-            '-c:v', 'copy',  # 不重新编码视频
+        ]
+
+        # 如果提供了实际FPS，使用它来修正视频时间戳
+        if video_fps is not None and video_fps > 0:
+            # 使用 -r 参数设置输入帧率，然后用 -filter:v 设置输出帧率
+            command.extend([
+                '-r', str(video_fps),  # 设置视频帧率
+                '-c:v', 'copy',  # 不重新编码视频
+            ])
+        else:
+            command.extend([
+                '-c:v', 'copy',  # 不重新编码视频
+            ])
+
+        command.extend([
             '-c:a', 'aac',   # 音频编码为AAC
             '-strict', 'experimental',
+            '-shortest',    # 以较短的流为准
             '-y',            # 覆盖输出文件
             output_path
-        ]
+        ])
 
         result = subprocess.run(
             command,
@@ -102,6 +118,47 @@ def get_ffmpeg_path() -> Optional[str]:
     except:
         pass
     return None
+
+
+def fix_video_fps(video_path: str, output_path: str, actual_fps: float) -> bool:
+    """
+    修正视频帧率（不重新编码，只修改容器时间戳）
+
+    Args:
+        video_path: 原视频文件路径
+        output_path: 输出文件路径
+        actual_fps: 实际帧率
+
+    Returns:
+        bool: 是否成功
+    """
+    try:
+        command = [
+            'ffmpeg',
+            '-i', video_path,
+            '-r', str(actual_fps),  # 设置正确的帧率
+            '-c', 'copy',  # 不重新编码
+            '-y',
+            output_path
+        ]
+
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return True
+        else:
+            error_msg = result.stderr.decode('utf-8', errors='ignore')
+            print(f"修正视频FPS失败: {error_msg}")
+            return False
+
+    except Exception as e:
+        print(f"修正视频FPS异常: {e}")
+        return False
 
 
 def merge_with_audio_only(video_path: str, output_path: str) -> bool:

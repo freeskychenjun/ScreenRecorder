@@ -50,6 +50,7 @@ class Recorder:
         self._start_time: Optional[float] = None
         self._frame_count = 0
         self._actual_fps = 0.0
+        self._recording_duration = 0.0  # 实际录制时长（秒）
 
         # 回调函数
         self.on_frame_captured: Optional[Callable[[np.ndarray], None]] = None
@@ -200,6 +201,10 @@ class Recorder:
         if self.video_writer:
             self.video_writer.close()
 
+        # 计算实际录制时长和实际FPS
+        recording_duration = time.time() - self._start_time if self._start_time else 0
+        actual_fps = self._frame_count / recording_duration if recording_duration > 0 else self.fps
+
         # 停止音频录制并合并
         if self.enable_audio and self.audio_capture:
             self.audio_capture.stop_recording()
@@ -219,9 +224,14 @@ class Recorder:
                     if os.path.exists(self.output_path):
                         os.rename(self.output_path, temp_video_path)
 
-                    # 合并音视频
+                    # 合并音视频，使用实际FPS修正视频时间戳
                     from utils.audio_merger import merge_audio_video
-                    success = merge_audio_video(temp_video_path, self.temp_audio_path, self.output_path)
+                    success = merge_audio_video(
+                        temp_video_path,
+                        self.temp_audio_path,
+                        self.output_path,
+                        video_fps=actual_fps
+                    )
 
                     # 清理临时文件
                     try:
@@ -247,6 +257,29 @@ class Recorder:
                 pass
             self.audio_capture = None
 
+        # 如果没有音频录制，但实际FPS与设定FPS差异较大，需要修正视频
+        elif not self.enable_audio and self._frame_count > 0:
+            # 只有当实际FPS与设定FPS差异超过5%时才修正
+            if abs(actual_fps - self.fps) / self.fps > 0.05:
+                import os
+                try:
+                    temp_video_path = self.output_path.replace('.mp4', '_temp_video.mp4')
+                    if os.path.exists(self.output_path):
+                        os.rename(self.output_path, temp_video_path)
+
+                    # 使用实际FPS重新封装视频
+                    from utils.audio_merger import fix_video_fps
+                    fix_video_fps(temp_video_path, self.output_path, actual_fps)
+
+                    # 清理临时文件
+                    try:
+                        if os.path.exists(temp_video_path):
+                            os.remove(temp_video_path)
+                    except:
+                        pass
+                except Exception as e:
+                    print(f"修正视频FPS失败: {e}")
+
         # 触发回调
         if self.on_recording_stopped:
             duration = time.time() - self._start_time if self._start_time else 0
@@ -268,14 +301,14 @@ class Recorder:
         Args:
             monitor: 录制区域/显示器信息
         """
-        frame_time = 1.0 / self.fps
-        last_frame_time = time.time()
+        frame_interval = 1.0 / self.fps  # 目标帧间隔（秒）
+        next_frame_time = time.time()  # 下一帧的目标时间
 
         while not self._stop_event.is_set():
             # 检查暂停状态
             if self._pause_event.is_set():
                 time.sleep(0.1)
-                last_frame_time = time.time()  # 重置帧时间
+                next_frame_time = time.time()  # 暂停后重置时间基准
                 continue
 
             try:
@@ -296,13 +329,14 @@ class Recorder:
                 elapsed = current_time - self._start_time if self._start_time else 1
                 self._actual_fps = self._frame_count / elapsed if elapsed > 0 else 0
 
-                # 控制帧率
-                processing_time = time.time() - current_time
-                sleep_time = frame_time - processing_time
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                # 计算下一帧的目标时间
+                next_frame_time += frame_interval
 
-                last_frame_time = time.time()
+                # 控制帧率：等待直到下一帧的目标时间
+                remaining_time = next_frame_time - time.time()
+                if remaining_time > 0:
+                    time.sleep(remaining_time)
+                # 如果处理时间超过了帧间隔，立即继续（丢帧以保证时间准确）
 
             except Exception as e:
                 self._trigger_error(f"录制过程中出错: {str(e)}")
